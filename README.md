@@ -1,2 +1,2 @@
-# rbx-db
+# RbxDb
 TODO: write readme
