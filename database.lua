@@ -1,8 +1,12 @@
+-- RbxDb
+-- mew903, 2021
+
+-- flags
+__DEBUG__ = true;
+
 local Players = game:GetService('Players');
 local RunService = game:GetService('RunService');
 local DataStoreService = game:GetService('DataStoreService');
-
-__DEBUG__ = true;
 
 local Database = { }; do
 	Database.Schema = { };
