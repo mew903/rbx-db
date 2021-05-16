@@ -1,13 +1,13 @@
--- Meant to be parented under 'Database.lua' module
+-- RbxDb.Profile
+-- mew903, 2021
 
-local Database = require(script.Parent);
-local RunService = game:GetService('RunService');
-
+-- flags
 __DEBUG__ = true;
 __TEST_PROFILE__ = false;
 __AUTO_RECONCILE__ = true;
 
 local Profile = { }; do
+	local Database = require(script.Parent);
 	local ProfileDatabase = Database('RbxDb_Profile');
 	local SessionDatabase = Database('RbxDb_Session');
 	
@@ -106,11 +106,11 @@ local Profile = { }; do
 				end
 			else
 				SessionDatabase:Update(playerDataKey, function()
+					return true;
+				end).Next(function()
 					if __DEBUG__ then
 						warn(string.format('[DEBUG][RBXDB-P] Profile session started for: %s {KEY=`%s`}', Player.Name, playerDataKey));
 					end;
-					
-					return true;
 				end).Submit();
 			end;
 		end;
