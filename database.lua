@@ -3,6 +3,7 @@
 
 -- flags
 __DEBUG__ = true;
+__VERBOSE__ = true;
 
 local Players = game:GetService('Players');
 local RunService = game:GetService('RunService');
@@ -25,10 +26,33 @@ local Database = { }; do
 				RunService.Heartbeat:Wait();
 			until os.clock() - self._fetches[Key] > rpm();
 		end;
+		
+		local value; do
+			local function fetchValue()
+				value = self._datastore:GetAsync(Key);
+			end;
+			
+			repeat
+				local success = xpcall(fetchValue, warn);
+				
+				if not success then
+					if __DEBUG__ or __VERBOSE__ then
+						warn(string.format('[DEBUG][RBXDB] Fetch request for `%s`{KEY=`%s`} failed. Retrying in 6 seconds...',
+							self._key, Key));
+					end;
+					
+					local elapsed = 0;
+
+					repeat
+						elapsed += RunService.Heartbeat:Wait();
+					until elapsed > 6;
+				end;
+			until success;
+		end;
 
 		self._fetches[Key] = os.clock();
 
-		return self._datastore:GetAsync(Key);
+		return value;
 	end;
 	
 	function Database.Update(self, Key, UpdateCallback)
@@ -153,6 +177,10 @@ local Database = { }; do
 	
 	-- start request runner
 	coroutine.wrap(function()
+		if __VERBOSE__ then
+			warn('[VERBO][RBXDB] Starting RbxDb')
+		end;
+		
 		while running and RunService.Heartbeat:Wait() do
 			for _, database in next, Database.Schema do
 				if database._busy or #database._updates == 0 then
@@ -170,7 +198,7 @@ local Database = { }; do
 						end, warn);
 
 						if not success then
-							if __DEBUG__ then
+							if __DEBUG__ or __VERBOSE__ then
 								warn(string.format('[DEBUG][RBXDB] Update request for `%s`{KEY=`%s`} failed. Retrying in 6 seconds...',
 									database._key, request._key));
 							end;
@@ -185,8 +213,8 @@ local Database = { }; do
 
 					database._timestamps[request._key] = os.clock();
 					
-					if __DEBUG__ then
-						warn(string.format('[DEBUG][RBXDB] Update request for `%s`{KEY=`%s`} completed in %.6fs', 
+					if __VERBOSE__ then
+						warn(string.format('[VERBO][RBXDB] Update request for `%s`{KEY=`%s`} completed in %.6fs', 
 							database._key, request._key, database._timestamps[request._key] - request._timestamp));
 					end;
 					
@@ -228,8 +256,8 @@ local Database = { }; do
 
 		running = false;
 
-		if __DEBUG__ then
-			warn('[DEBUG][RBXDB] Exited successfully');
+		if __VERBOSE__ then
+			warn('[VERBO][RBXDB] Exited successfully');
 		end;
 	end);
 end;
