@@ -18,6 +18,14 @@ local Database = { }; do
 		return (60 + (#Players:GetPlayers() * 10)) / 60;
 	end;
 	
+	local function wait(t, f)		
+		local elapsed = 0;
+
+		repeat
+			elapsed += RunService.Heartbeat:Wait();
+		until elapsed > t + (f and f() or 0);
+	end;
+	
 	--
 
 	function Database.Fetch(self, Key)
@@ -40,11 +48,7 @@ local Database = { }; do
 						warn(string.format('[DEBUG][RBXDB] Fetch request for `%s`{KEY=`%s`} failed. Retrying in 6 seconds...', self._key, Key));
 					end;
 					
-					local elapsed = 0;
-
-					repeat
-						elapsed += RunService.Heartbeat:Wait();
-					until elapsed > 6;
+					wait(6);
 				end;
 			until success;
 		end;
@@ -90,13 +94,10 @@ local Database = { }; do
 	end;
 	
 	function Database.Yield(self, Key)
-		local elapsed = 0;
 		local keystamp = self._timestamps[Key];
 		local throttle = keystamp and os.clock() - keystamp or 0;
 
-		repeat
-			elapsed += RunService.Heartbeat:Wait();
-		until elapsed > throttle + rpm();
+		wait(throttle, rpm);
 	end;
 	
 	--
@@ -153,7 +154,7 @@ local Database = { }; do
 	
 	-- stale timestamp janitor
 	coroutine.wrap(function()
-		while running and RunService.Heartbeat:Wait() do
+		while running do
 			for _, database in next, Database.Schema do
 				for key, timestamp in next, database._timestamps do
 					if os.clock() - timestamp > 10 then
@@ -162,11 +163,7 @@ local Database = { }; do
 				end;
 			end;
 
-			local elapsed = 0;
-
-			repeat
-				elapsed += RunService.Heartbeat:Wait();
-			until elapsed > 10;
+			wait(10);
 		end;
 	end)();
 	
@@ -176,7 +173,7 @@ local Database = { }; do
 			warn('[VERBO][RBXDB] Starting RbxDb')
 		end;
 		
-		while running and RunService.Heartbeat:Wait() do
+		while running do
 			for _, database in next, Database.Schema do
 				if database._busy or #database._updates == 0 then
 					continue;
@@ -198,11 +195,7 @@ local Database = { }; do
 									database._key, request._key));
 							end;
 
-							local elapsed = 0;
-
-							repeat
-								elapsed += RunService.Heartbeat:Wait();
-							until elapsed > 6;
+							wait(6);
 						end;
 					until success;
 
@@ -230,6 +223,8 @@ local Database = { }; do
 					database._busy = false;
 				end)();
 			end;
+			
+			RunService.Heartbeat:Wait();
 		end;
 	end)();
 
