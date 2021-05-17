@@ -59,7 +59,13 @@ local Profile = { }; do
 	end;
 	
 	function Profile.Release(self)
-		local sessionPromise;
+		local endSessionPromise = SessionDatabase:Update(self._key, function()
+			return false;
+		end).Next(function()
+			if __DEBUG__ or __VERBOSE__ then
+				warn(string.format('[DEBUG][RBXDB-P] Profile session released for: %s {KEY=`%s`}', self._player.Name, self._key));
+			end;
+		end)
 		
 		ProfileDatabase:Update(self._key, function()
 			return self._data;
@@ -68,18 +74,10 @@ local Profile = { }; do
 				warn(string.format('[DEBUG][RBXDB-P] Profile data saved for: %s {KEY=`%s`}', self._player.Name, self._key));
 			end;
 		end).Bind(function()
-			sessionPromise = SessionDatabase:Update(self._key, function()
-				return false;
-			end).Next(function()
-				if __DEBUG__ or __VERBOSE__ then
-					warn(string.format('[DEBUG][RBXDB-P] Profile session released for: %s {KEY=`%s`}', self._player.Name, self._key));
-				end;
-			end).Submit();
+			endSessionPromise.Submit();
 		end).Submit();
 		
-		return function()
-			return sessionPromise and not sessionPromise.Queue();
-		end;
+		return endSessionPromise.Queue;
 	end;
 	
 	function Profile.Set(self, Key, Value)
