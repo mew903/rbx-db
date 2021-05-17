@@ -160,16 +160,27 @@ local Database = { }; do
 	
 	-- stale timestamp janitor
 	coroutine.wrap(function()
-		while running do
-			for _, database in next, Database.Schema do
-				for key, timestamp in next, database._timestamps do
-					if os.clock() - timestamp > 10 then
-						database._timestamps[key] = nil;
-					end;
+		local function clockOut()
+			return not running and -10 or 0;
+		end;
+		
+		local function sweep(TimestampTable)
+			for key, timestamp in next, TimestampTable do
+				if os.clock() - timestamp > 10 then
+					TimestampTable[key] = nil;
 				end;
 			end;
+		end;
+		
+		while running do
+			for _, database in next, Database.Schema do
+				coroutine.wrap(function()
+					sweep(database._fetches);
+					sweep(database._timestamps);
+				end)();
+			end;
 
-			yield(10);
+			yield(10, clockOut);
 		end;
 	end)();
 	
