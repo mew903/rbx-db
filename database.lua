@@ -37,8 +37,7 @@ local Database = { }; do
 				
 				if not success then
 					if __DEBUG__ or __VERBOSE__ then
-						warn(string.format('[DEBUG][RBXDB] Fetch request for `%s`{KEY=`%s`} failed. Retrying in 6 seconds...',
-							self._key, Key));
+						warn(string.format('[DEBUG][RBXDB] Fetch request for `%s`{KEY=`%s`} failed. Retrying in 6 seconds...', self._key, Key));
 					end;
 					
 					local elapsed = 0;
@@ -56,38 +55,34 @@ local Database = { }; do
 	end;
 	
 	function Database.Update(self, Key, UpdateCallback)
-		local request = { }; do
-			request._key = Key;
-			request._next = { };
-			request._timestamp = os.clock();
-			request._callback = UpdateCallback;
+		local chain, bindings, request = { }, { }, {
+			_key = Key;
+			_next = { };
+			_timestamp = os.clock();
+			_callback = UpdateCallback;
+		};
+
+		function chain.Bind(BindCallback)
+			table.insert(bindings, BindCallback);
+
+			return chain;
 		end;
-		
-		local chain = { }; do
-			local bindings = { };
-			
-			function chain.Bind(BindCallback)
-				table.insert(bindings, BindCallback);
-				
-				return chain;
-			end;
-			
-			function chain.Next(NextCallback)
-				table.insert(request._next, NextCallback);
-				
-				return chain;
-			end;
-			
-			function chain.Queue()
-				return table.find(self._updates, request);
-			end;
-			
-			function chain.Submit()
-				table.insert(self._updates, request);
-				
-				for _, callback in next, bindings do
-					callback();
-				end;
+
+		function chain.Next(NextCallback)
+			table.insert(request._next, NextCallback);
+
+			return chain;
+		end;
+
+		function chain.Queue()
+			return table.find(self._updates, request);
+		end;
+
+		function chain.Submit()
+			table.insert(self._updates, request);
+
+			for _, callback in next, bindings do
+				callback();
 			end;
 		end;
 
@@ -140,9 +135,9 @@ local Database = { }; do
 			
 			if not module then
 				local moduleScript = script:FindFirstChild(Key);
+				module = moduleScript and moduleScript:IsA('ModuleScript') and rawget(rawset(modules, Key, require(moduleScript)), Key);
 				
-				module = moduleScript and moduleScript:IsA('ModuleScript') and rawget(rawset(modules, Key, require(moduleScript)), Key)
-					or error(string.format('`%s` is not a valid ModuleScript within RbxDb', Key));
+				assert(module, string.format('`%s` is not a valid ModuleScript within RbxDb', Key));
 				
 				if __DEBUG__ and typeof(module.SetDebugMode) == 'function' then
 					module:SetDebugMode(__DEBUG__);
