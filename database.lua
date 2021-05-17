@@ -45,7 +45,7 @@ local Database = { }; do
 				
 				if not success then
 					if __DEBUG__ or __VERBOSE__ then
-						warn(string.format('[DEBUG][RBXDB] Fetch request for `%s`{KEY=`%s`} failed. Retrying in 6 seconds...', self._key, Key));
+						warn(string.format('[RBXDB] Fetch request for `%s`{KEY=`%s`} failed. Retrying in 6 seconds...', self._key, Key));
 					end;
 					
 					yield(6);
@@ -56,6 +56,12 @@ local Database = { }; do
 		self._fetches[Key] = os.clock();
 
 		return value;
+	end;
+	
+	local empty, space = '', ' ';
+	
+	function Database.Out(self, header, message)
+		warn(string.format('[RBXDB][%s]%s%s', self._key, message and header .. space or space .. header, message or empty));
 	end;
 	
 	function Database.Update(self, Key, UpdateCallback)
@@ -106,35 +112,27 @@ local Database = { }; do
 		yield(throttle, rpm);
 	end;
 	
-	--
-	
-	function Database.SetDebugMode(DebugMode)
-		__DEBUG__ = __DEBUG__ or DebugMode;
-	end;
-	
-	function Database.new(DataStoreName, Scope)
-		local database = setmetatable({
-			_busy = false;
-			
-			_fetches = { };
-			_updates = { };
-			_timestamps = { };
-			
-			_datastore = DataStoreService:GetDataStore(DataStoreName, Scope);
-			_key = Scope and string.format('%s_%s', DataStoreName, Scope) or DataStoreName;
-		}, Database);
-		
-		Database.Schema[database._key] = database;
-		
-		return database;
-	end;
-	
 	-- private table avoids cyclic references for child modules
 	local modules = { };
 	
 	setmetatable(Database, {
+		-- Constructor: <module alias>(string DataStoreName, string Scope)
+		
 		__call = function(self, DataStoreName, Scope)
-			return Database.new(DataStoreName, Scope);
+			local database = setmetatable({
+				_busy = false;
+
+				_fetches = { };
+				_updates = { };
+				_timestamps = { };
+				
+				_datastore = DataStoreService:GetDataStore(DataStoreName, Scope);
+				_key = Scope and string.format('%s-%s', DataStoreName, Scope) or DataStoreName;
+			}, Database);
+
+			Database.Schema[database._key] = database;
+
+			return database;
 		end;
 		
 		__index = function(self, Key)
@@ -144,7 +142,7 @@ local Database = { }; do
 				local moduleScript = script:FindFirstChild(Key);
 				module = moduleScript and moduleScript:IsA('ModuleScript') and rawget(rawset(modules, Key, require(moduleScript)), Key);
 				
-				assert(module, string.format('`%s` is not a valid ModuleScript within RbxDb', Key));
+				assert(module, string.format('[RBXDB]`%s` is not a valid ModuleScript', Key));
 				
 				if __DEBUG__ and typeof(module.SetDebugMode) == 'function' then
 					module:SetDebugMode(__DEBUG__);
@@ -154,6 +152,10 @@ local Database = { }; do
 			return module;
 		end;
 	});
+	
+	function Database.SetDebugMode(DebugMode)
+		__DEBUG__ = __DEBUG__ or DebugMode;
+	end;
 	
 	-- the on/off switch
 	local running = true;
@@ -187,7 +189,7 @@ local Database = { }; do
 	-- start request runner
 	coroutine.wrap(function()
 		if __VERBOSE__ then
-			warn('[VERBO][RBXDB] Starting RbxDb')
+			warn('[RBXDB] Starting RbxDb')
 		end;
 		
 		while running do
@@ -208,7 +210,7 @@ local Database = { }; do
 
 						if not success then
 							if __DEBUG__ or __VERBOSE__ then
-								warn(string.format('[DEBUG][RBXDB] Update request for `%s`{KEY=`%s`} failed. Retrying in 6 seconds...',
+								warn(string.format('[RBXDB] Update request for `%s`{KEY=`%s`} failed. Retrying in 6 seconds...',
 									database._key, request._key));
 							end;
 
@@ -219,7 +221,7 @@ local Database = { }; do
 					database._timestamps[request._key] = os.clock();
 					
 					if __VERBOSE__ then
-						warn(string.format('[VERBO][RBXDB] Update request for `%s`{KEY=`%s`} completed in %.6fs', 
+						warn(string.format('[RBXDB] Update request for `%s`{KEY=`%s`} took %.2fs', 
 							database._key, request._key, database._timestamps[request._key] - request._timestamp));
 					end;
 					
@@ -264,7 +266,7 @@ local Database = { }; do
 		running = false;
 
 		if __VERBOSE__ then
-			warn('[VERBO][RBXDB] Exited successfully');
+			warn('[RBXDB] Exited successfully');
 		end;
 	end);
 end;
