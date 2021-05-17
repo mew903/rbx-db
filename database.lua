@@ -62,6 +62,7 @@ local Database = { }; do
 		local chain, bindings, request = { }, { }, {
 			_key = Key;
 			_next = { };
+			_submitted = false;
 			_timestamp = os.clock();
 			_callback = UpdateCallback;
 		};
@@ -79,11 +80,16 @@ local Database = { }; do
 		end;
 
 		function chain.Queue()
-			return table.find(self._updates, request);
+			if self._submitted then
+				return table.find(self._updates, request);
+			end;
+			
+			return -1;
 		end;
 
 		function chain.Submit()
 			table.insert(self._updates, request);
+			self._submitted = true;
 
 			for _, callback in next, bindings do
 				callback();
