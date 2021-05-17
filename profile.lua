@@ -1,37 +1,17 @@
 -- RbxDb.Profile
 -- mew903, 2021
 
+local Database = require(script.Parent);
+local ProfileDatabase = Database('RbxDb_Profile');
+local SessionDatabase = Database('RbxDb_Session');
+
 -- flags
 __DEBUG__ = true;
 __VERBOSE__ = true;
 __TEST_PROFILE__ = false;
 __AUTO_RECONCILE__ = true;
 
-local Profile = { }; do
-	local Database = require(script.Parent);
-	local ProfileDatabase = Database('RbxDb_Profile');
-	local SessionDatabase = Database('RbxDb_Session');
-	
-	local function copy(Input)
-		local newProfile = { };
-
-		for key, value in next, Input do
-			if typeof(value) == 'table' then
-				newProfile[key] = copy(value);
-			else
-				newProfile[key] = value;
-			end;
-		end;
-
-		return newProfile;
-	end;
-
-	local function key(Player)
-		return (__TEST_PROFILE__ and 'TEST_' or 'P_') .. Player.UserId;
-	end;
-	
-	--
-	
+local Profile = { };
 	Profile.__index = Profile;
 	
 	function Profile.Get(self, Key)
@@ -109,8 +89,24 @@ local Profile = { }; do
 		
 		self._data[Key] = Value;
 	end;
-	
-	--
+
+	local function copy(Input)
+		local newProfile = { };
+
+		for key, value in next, Input do
+			if typeof(value) == 'table' then
+				newProfile[key] = copy(value);
+			else
+				newProfile[key] = value;
+			end;
+		end;
+
+		return newProfile;
+	end;
+
+	local function key(Player)
+		return (__TEST_PROFILE__ and 'TEST_' or 'P_') .. Player.UserId;
+	end;
 	
 	function Profile.SetDebugMode(DebugMode)
 		__DEBUG__ = __DEBUG__ or DebugMode;
@@ -120,33 +116,33 @@ local Profile = { }; do
 		local isNewProfile = false;
 		local timeStamp = os.time();
 
-		local playerDataKey = key(Player); do
-			if SessionDatabase:Fetch(playerDataKey) then
-				if __DEBUG__ or __VERBOSE__ then
-					warn(string.format('[DEBUG][RBXDB-P] Active session detected for: %s {KEY=`%s`}', Player.Name, playerDataKey));
-				else
-					return Player:Kick('Session error. Please try again later!');
-				end
+		local playerDataKey = key(Player);
+		
+		if SessionDatabase:Fetch(playerDataKey) then
+			if __DEBUG__ or __VERBOSE__ then
+				warn(string.format('[DEBUG][RBXDB-P] Active session detected for: %s {KEY=`%s`}', Player.Name, playerDataKey));
 			else
-				SessionDatabase:Update(playerDataKey, function()
-					return true;
-				end).Next(function()
-					if __DEBUG__ or __VERBOSE__ then
-						warn(string.format('[DEBUG][RBXDB-P] Profile session started for: %s {KEY=`%s`}', Player.Name, playerDataKey));
-					end;
-				end).Submit();
-			end;
+				return Player:Kick('Session error. Please try again later!');
+			end
+		else
+			SessionDatabase:Update(playerDataKey, function()
+				return true;
+			end).Next(function()
+				if __DEBUG__ or __VERBOSE__ then
+					warn(string.format('[DEBUG][RBXDB-P] Profile session started for: %s {KEY=`%s`}', Player.Name, playerDataKey));
+				end;
+			end).Submit();
 		end;
 
-		local profileData = ProfileDatabase:Fetch(playerDataKey); do
-			if not profileData then
-				if __VERBOSE__ then
-					warn(string.format('[VERBO][RBXDB-P] Creating new Profile for: %s {KEY=`%s`}', Player.Name, playerDataKey));
-				end;
-				
-				isNewProfile = true;
-				profileData = copy(Template);
+		local profileData = ProfileDatabase:Fetch(playerDataKey);
+		
+		if not profileData then
+			if __VERBOSE__ then
+				warn(string.format('[VERBO][RBXDB-P] Creating new Profile for: %s {KEY=`%s`}', Player.Name, playerDataKey));
 			end;
+			
+			isNewProfile = true;
+			profileData = copy(Template);
 		end;
 
 		local profile = setmetatable({
