@@ -11,7 +11,7 @@ __VERBOSE__ = true;
 __TEST_PROFILE__ = false;
 __AUTO_RECONCILE__ = true;
 
-local Profile = { };
+local Profile = { }; do
 	Profile.__index = Profile;
 	
 	function Profile.Get(self, Key)
