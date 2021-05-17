@@ -18,7 +18,7 @@ local Database = { }; do
 		return (60 + (#Players:GetPlayers() * 10)) / 60;
 	end;
 	
-	local function wait(t, f)		
+	local function yield(t, f)		
 		local elapsed = 0;
 
 		repeat
@@ -48,7 +48,7 @@ local Database = { }; do
 						warn(string.format('[DEBUG][RBXDB] Fetch request for `%s`{KEY=`%s`} failed. Retrying in 6 seconds...', self._key, Key));
 					end;
 					
-					wait(6);
+					yield(6);
 				end;
 			until success;
 		end;
@@ -97,7 +97,7 @@ local Database = { }; do
 		local keystamp = self._timestamps[Key];
 		local throttle = keystamp and os.clock() - keystamp or 0;
 
-		wait(throttle, rpm);
+		yield(throttle, rpm);
 	end;
 	
 	--
@@ -163,7 +163,7 @@ local Database = { }; do
 				end;
 			end;
 
-			wait(10);
+			yield(10);
 		end;
 	end)();
 	
@@ -195,7 +195,7 @@ local Database = { }; do
 									database._key, request._key));
 							end;
 
-							wait(6);
+							yield(6);
 						end;
 					until success;
 
