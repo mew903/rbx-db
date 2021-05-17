@@ -3,6 +3,7 @@
 
 -- flags
 __DEBUG__ = true;
+__VERBOSE__ = true;
 __TEST_PROFILE__ = false;
 __AUTO_RECONCILE__ = true;
 
@@ -26,7 +27,7 @@ local Profile = { }; do
 	end;
 
 	local function key(Player)
-		return (__TEST_PROFILE__ and 'TEST__' or 'P_') .. Player.UserId;
+		return (__TEST_PROFILE__ and 'TEST_' or 'P_') .. Player.UserId;
 	end;
 	
 	--
@@ -42,16 +43,26 @@ local Profile = { }; do
 	end;
 	
 	function Profile.Reconcile(self)
+		local reconciled = false;
+		
 		for key, value in next, self._data do
 			if typeof(self._template[key]) == 'function' then
+				reconciled = true;
+				
 				self._template[key](self._data, value);
 			end;
 		end;
 		
 		for key, value in next, self._template do
 			if not self._data[key] then
+				reconciled = true;
+				
 				self._data[key] = typeof(value) == 'function' and value(self._data) or value;
 			end;
+		end;
+		
+		if reconciled and __VERBOSE__ then
+			warn(string.format('[VERBO][RBXDB-P] Profile reconciled for: %s {KEY=`%s`}', self._player.Name, self._key));
 		end;
 	end;
 	
@@ -61,14 +72,14 @@ local Profile = { }; do
 		ProfileDatabase:Update(self._key, function()
 			return self._data;
 		end).Next(function()
-			if __DEBUG__ then
+			if __DEBUG__ or __VERBOSE__ then
 				warn(string.format('[DEBUG][RBXDB-P] Profile data saved for: %s {KEY=`%s`}', self._player.Name, self._key));
 			end;
 		end).Bind(function()
 			sessionPromise = SessionDatabase:Update(self._key, function()
 				return false;
 			end).Next(function()
-				if __DEBUG__ then
+				if __DEBUG__ or __VERBOSE__ then
 					warn(string.format('[DEBUG][RBXDB-P] Profile session released for: %s {KEY=`%s`}', self._player.Name, self._key));
 				end;
 			end).Submit();
@@ -80,8 +91,8 @@ local Profile = { }; do
 	end;
 	
 	function Profile.Set(self, Key, Value)
-		if __DEBUG__ then
-			warn(string.format('[DEBUG][RBXDB-P] SET `%s`{%s=%s}', self._key, Key, Value));
+		if __VERBOSE__ then
+			warn(string.format('[VERBO][RBXDB-P] SET `%s`{%s=%s}', self._key, Key, Value));
 		end;
 		
 		self._data[Key] = Value;
@@ -99,7 +110,7 @@ local Profile = { }; do
 
 		local playerDataKey = key(Player); do
 			if SessionDatabase:Fetch(playerDataKey) then
-				if __DEBUG__ then
+				if __DEBUG__ or __VERBOSE__ then
 					warn(string.format('[DEBUG][RBXDB-P] Active session detected for: %s {KEY=`%s`}', Player.Name, playerDataKey));
 				else
 					return Player:Kick('Session error. Please try again later!');
@@ -108,7 +119,7 @@ local Profile = { }; do
 				SessionDatabase:Update(playerDataKey, function()
 					return true;
 				end).Next(function()
-					if __DEBUG__ then
+					if __DEBUG__ or __VERBOSE__ then
 						warn(string.format('[DEBUG][RBXDB-P] Profile session started for: %s {KEY=`%s`}', Player.Name, playerDataKey));
 					end;
 				end).Submit();
@@ -117,8 +128,8 @@ local Profile = { }; do
 
 		local profileData = ProfileDatabase:Fetch(playerDataKey); do
 			if not profileData then
-				if __DEBUG__ then
-					warn(string.format('[DEBUG][RBXDB-P] Creating new Profile for: %s {KEY=`%s`}', Player.Name, playerDataKey));
+				if __VERBOSE__ then
+					warn(string.format('[VERBO][RBXDB-P] Creating new Profile for: %s {KEY=`%s`}', Player.Name, playerDataKey));
 				end;
 				
 				isNewProfile = true;
@@ -146,37 +157,48 @@ local Profile = { }; do
 	Profile.Mock.__index = Profile.Mock;
 	
 	function Profile.Mock.Get(self, Key)
-		warn(string.format('[RBXDB-P-MOCK] FETCH `%s`{%s}', self._key, Key));
+		if __VERBOSE__ then
+			warn(string.format('[VERBO][RBXDB-P] FETCH `%s`{%s}', self._key, Key));
+		end;
 		
 		return self._data[Key];
 	end;
 	
 	function Profile.Mock.Reconcile(self)
 		-- pass
-		warn(string.format('[RBXDB-P-MOCK] Profile reconciled for: %s {UID=%d}', self._player.Name, self._player.UserId));
+		if __VERBOSE__ then
+			warn(string.format('[VERBO][RBXDB-P] Mock-Profile reconciled for: %s {KEY=`%s`}', self._player.Name, self._key));
+		end;
 	end;
 	
 	function Profile.Mock.Release(self)
 		-- pass
-		warn(string.format('[RBXDB-P-MOCK] Profile session released for: %s {UID=%d}', self._player.Name, self._player.UserId));
+		if __DEBUG__ or __VERBOSE__ then
+			warn(string.format('[DEBUG][RBXDB-P] Mock-Profile session released for: %s {KEY=`%s`}', self._player.Name, self._key));
+		end;
 	end;
 	
 	function Profile.Mock.Set(self, Key, Value)
-		warn(string.format('[RBXDB-P-MOCK] UPDATE `%s`{%s=%s}', self._key, Key, Value));
+		if __VERBOSE__ then
+			warn(string.format('[VERBO][RBXDB-P] SET `%s`{%s=%s}', self._key, Key, Value));
+		end;
 		
 		self._data[Key] = Value;
 	end;
 	
 	function Profile.Mock.new(Player, Template)
+		local mockKey = key(Player);
 		local timeStamp = os.time();
 		local mockProfileData = copy(Template);
 		mockProfileData.FirstLogin, mockProfileData.LastLogin = timeStamp, timeStamp;
 		
-		warn(string.format('[RBXDB-P-MOCK] Profile session started for: %s {UID=%d}', Player.Name, Player.UserId));
+		if __DEBUG__ or __VERBOSE__ then
+			warn(string.format('[DEBUG][RBXDB-P] Mock-Profile session started for: %s {KEY=`%s`}', Player.Name, mockKey));
+		end;
 		
 		return setmetatable({
+			_key = mockKey;
 			_player = Player;
-			_key = key(Player);
 			_template = Template;
 			_data = mockProfileData;
 		}, Profile.Mock);
