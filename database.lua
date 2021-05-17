@@ -127,9 +127,9 @@ local Database = { }; do
 				_timestamps = { };
 				
 				_datastore = DataStoreService:GetDataStore(DataStoreName, Scope);
-				_key = Scope and string.format('%s-%s', DataStoreName, Scope) or DataStoreName;
+				_key = Scope and string.format('%s@%s', DataStoreName, Scope) or DataStoreName;
 			}, Database);
-
+			
 			Database.Schema[database._key] = database;
 
 			return database;
