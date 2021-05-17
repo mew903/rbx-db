@@ -43,27 +43,39 @@ local Profile = { }; do
 	end;
 	
 	function Profile.Reconcile(self)
-		local reconciled = false;
+		local reconciled = { };
 		
 		for key, value in next, self._data do
 			if typeof(self._template[key]) == 'function' then
-				reconciled = true;
-				
 				self._template[key](self._data, value);
+				
+				table.insert(reconciled, {
+					key = key;
+					old = value;
+					source = self._key;
+					new = self._data[key];
+				});
 			end;
 		end;
 		
 		for key, value in next, self._template do
-			if not self._data[key] then
-				reconciled = true;
-				
+			if self._data[key] == nil then
 				self._data[key] = typeof(value) == 'function' and value(self._data) or value;
+				
+				table.insert(reconciled, {
+					key = key;
+					old = nil;
+					source = 'template';
+					new = self._data[key];
+				});
 			end;
 		end;
 		
-		if reconciled and __VERBOSE__ then
+		if #reconciled > 0 and __VERBOSE__ then
 			warn(string.format('[VERBO][RBXDB-P] Profile reconciled for: %s {KEY=`%s`}', self._player.Name, self._key));
 		end;
+		
+		return #reconciled > 0 and reconciled;
 	end;
 	
 	function Profile.Release(self)
