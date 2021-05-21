@@ -15,7 +15,7 @@ local Database = { }; do
 	
 	-- calculates requests per minute for unique keys
 	local function rpm()
-		return (60 + (#Players:GetPlayers() * 10)) / 60;
+		return 60 / (60 + (#Players:GetPlayers() * 10));
 	end;
 	
 	local function yield(t, f)		
@@ -36,12 +36,12 @@ local Database = { }; do
 		end;
 		
 		local value; do
-			local function fetchValue()
+			local function get()
 				value = self._datastore:GetAsync(Key);
 			end;
 			
 			repeat
-				local success = xpcall(fetchValue, warn);
+				local success = xpcall(get, warn);
 				
 				if not success then
 					if __DEBUG__ or __VERBOSE__ then
@@ -51,10 +51,10 @@ local Database = { }; do
 					yield(6);
 				end;
 			until success;
+			
+			self._fetches[Key] = os.clock();
 		end;
-
-		self._fetches[Key] = os.clock();
-
+		
 		return value;
 	end;
 	
@@ -87,14 +87,14 @@ local Database = { }; do
 
 		function chain.Queue()
 			if self._submitted then
-				return table.find(self._updates, request);
+				return table.find(self._requests, request);
 			end;
 			
 			return -1;
 		end;
 
 		function chain.Submit()
-			table.insert(self._updates, request);
+			table.insert(self._requests, request);
 			self._submitted = true;
 
 			for _, callback in next, bindings do
@@ -106,7 +106,7 @@ local Database = { }; do
 	end;
 	
 	function Database.Yield(self, Key)
-		local keystamp = self._timestamps[Key];
+		local keystamp = self._updates[Key];
 		local throttle = keystamp and os.clock() - keystamp or 0;
 
 		yield(throttle, rpm);
@@ -121,10 +121,10 @@ local Database = { }; do
 		__call = function(self, DataStoreName, Scope)
 			local database = setmetatable({
 				_busy = false;
-
+				
 				_fetches = { };
 				_updates = { };
-				_timestamps = { };
+				_requests = { };
 				
 				_datastore = DataStoreService:GetDataStore(DataStoreName, Scope);
 				_key = Scope and string.format('%s@%s', DataStoreName, Scope) or DataStoreName;
@@ -141,21 +141,12 @@ local Database = { }; do
 			if not module then
 				local moduleScript = script:FindFirstChild(Key);
 				module = moduleScript and moduleScript:IsA('ModuleScript') and rawget(rawset(modules, Key, require(moduleScript)), Key);
-				
 				assert(module, string.format('[RBXDB]`%s` is not a valid ModuleScript', Key));
-				
-				if __DEBUG__ and typeof(module.SetDebugMode) == 'function' then
-					module:SetDebugMode(__DEBUG__);
-				end;
 			end;
 			
 			return module;
 		end;
 	});
-	
-	function Database.SetDebugMode(DebugMode)
-		__DEBUG__ = __DEBUG__ or DebugMode;
-	end;
 	
 	-- the on/off switch
 	local running = true;
@@ -166,19 +157,21 @@ local Database = { }; do
 			return not running and -10 or 0;
 		end;
 		
-		local function sweep(TimestampTable)
+		local function sweep(TimestampTable, CleanAfter)
 			for key, timestamp in next, TimestampTable do
-				if os.clock() - timestamp > 10 then
+				if os.clock() - timestamp > CleanAfter then
 					TimestampTable[key] = nil;
 				end;
 			end;
 		end;
 		
+		local sweepFrequency = 10;
+		
 		while running do
 			for _, database in next, Database.Schema do
 				coroutine.wrap(function()
-					sweep(database._fetches);
-					sweep(database._timestamps);
+					sweep(database._fetches, sweepFrequency);
+					sweep(database._updates, sweepFrequency);
 				end)();
 			end;
 
@@ -194,14 +187,14 @@ local Database = { }; do
 		
 		while running do
 			for _, database in next, Database.Schema do
-				if database._busy or #database._updates == 0 then
+				if database._busy or #database._requests == 0 then
 					continue;
 				end;
 				
 				database._busy = true;
 				
 				coroutine.wrap(function()
-					local request = database._updates[1];
+					local request = database._requests[1];
 
 					repeat
 						local success = xpcall(function()
@@ -217,12 +210,12 @@ local Database = { }; do
 							yield(6);
 						end;
 					until success;
-
-					database._timestamps[request._key] = os.clock();
+					
+					database._updates[request._key] = os.clock();
 					
 					if __VERBOSE__ then
 						warn(string.format('[RBXDB] Update request for `%s`{KEY=`%s`} took %.2fs', 
-							database._key, request._key, database._timestamps[request._key] - request._timestamp));
+							database._key, request._key, database._updates[request._key] - request._timestamp));
 					end;
 					
 					for index, callback in ipairs(request._next) do
@@ -232,7 +225,7 @@ local Database = { }; do
 					end;
 
 					database:Yield(request._key);
-					table.remove(database._updates, table.find(database._updates, request));
+					table.remove(database._requests, table.find(database._requests, request));
 					
 					for key in next, request do
 						request[key] = nil;
@@ -253,7 +246,7 @@ local Database = { }; do
 			local busy = false;
 			
 			for _, database in next, Database.Schema do
-				busy = database._busy or #database._updates > 0;
+				busy = database._busy or #database._requests > 0;
 				
 				if busy then
 					break;
