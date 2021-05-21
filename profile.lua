@@ -15,8 +15,10 @@ local Profile = { }; do
 	Profile.__index = Profile;
 	
 	function Profile.Get(self, Key)
+		assert(Key and typeof(Key) == 'string', 'Invalid argument to #1 (string expected)');
+		
 		if __DEBUG__ then
-			ProfileDatabase:Out(string.format('GET `%s`{%s}', self.key, Key));
+			ProfileDatabase:Out(string.format('GET `%s`{%s}', self._key, Key or nil));
 		end;
 		
 		return self._data[Key];
@@ -27,7 +29,11 @@ local Profile = { }; do
 		
 		for key, value in next, self._data do
 			if typeof(self._template[key]) == 'function' then
-				self._template[key](self._data, value);
+				local result = self._template[key](self._data, value);
+				
+				if result == -1 then
+					self._data[key] = nil;
+				end;
 				
 				table.insert(reconciled, {
 					key = key;
@@ -53,13 +59,17 @@ local Profile = { }; do
 		
 		if #reconciled > 0 and __VERBOSE__ then
 			ProfileDatabase:Out(string.format('Profile reconciled for: %s {KEY=`%s`}', self._player.Name, self._key));
+			
+			for _, attribute in next, reconciled do
+				ProfileDatabase:Out(string.format('\tATTR=`%s`{VALUE=`%s` -> `%s`}', attribute.key, attribute.old or 'nil', attribute.new or 'nil'));
+			end;
 		end;
 		
 		return #reconciled > 0 and reconciled;
 	end;
 	
 	function Profile.Release(self)
-		local endSessionPromise = SessionDatabase:Update(self._key, function()
+		local endSession = SessionDatabase:Update(self._key, function()
 			return false;
 		end).Next(function()
 			if __DEBUG__ or __VERBOSE__ then
@@ -74,15 +84,18 @@ local Profile = { }; do
 				ProfileDatabase:Out(string.format('Profile data saved for: %s {KEY=`%s`}', self._player.Name, self._key));
 			end;
 		end).Bind(function()
-			endSessionPromise.Submit();
+			endSession.Submit();
 		end).Submit();
 		
-		return endSessionPromise.Queue;
+		return endSession.Queue;
 	end;
 	
 	function Profile.Set(self, Key, Value)
+		assert(Key and typeof(Key) == 'string', 'Invalid argument to #1 (string expected)');
+		assert(Value, 'Invalid argument to #2 (Anything but nil expected)');
+		
 		if __VERBOSE__ then
-			ProfileDatabase:Out(string.format('SET `%s`{%s=%s}', self._key, Key, Value));
+			ProfileDatabase:Out(string.format('SET `%s`{%s=%s}', self._key, Key, tostring(Value)));
 		end;
 		
 		self._data[Key] = Value;
@@ -104,10 +117,6 @@ local Profile = { }; do
 
 	local function key(Player)
 		return (__TEST_PROFILE__ and 'TEST_' or 'P_') .. Player.UserId;
-	end;
-	
-	function Profile.SetDebugMode(DebugMode)
-		__DEBUG__ = __DEBUG__ or DebugMode;
 	end;
 	
 	function Profile.new(Player, Template)
@@ -154,7 +163,7 @@ local Profile = { }; do
 			profile:Reconcile();
 		end;
 
-		return profile;
+		return profile, isNewProfile;
 	end;
 	
 	--
@@ -205,7 +214,7 @@ local Profile = { }; do
 			_player = Player;
 			_template = Template;
 			_data = copy(Template);
-		}, Profile.Mock);
+		}, Profile.Mock), true;
 	end;
 end;
 
