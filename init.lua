@@ -25,8 +25,6 @@ local Database = { }; do
 			elapsed += RunService.Heartbeat:Wait();
 		until elapsed > t + (f and f() or 0);
 	end;
-	
-	--
 
 	function Database.Fetch(self, Key)
 		if self._fetches[Key] then
@@ -120,8 +118,6 @@ local Database = { }; do
 		
 		__call = function(self, DataStoreName, Scope)
 			local database = setmetatable({
-				_busy = false;
-				
 				_fetches = { };
 				_updates = { };
 				_requests = { };
@@ -187,11 +183,9 @@ local Database = { }; do
 		
 		while running do
 			for _, database in next, Database.Schema do
-				if database._busy or #database._requests == 0 then
+				if #database._requests == 0 then
 					continue;
 				end;
-				
-				database._busy = true;
 				
 				coroutine.wrap(function()
 					local request = database._requests[1];
@@ -234,7 +228,6 @@ local Database = { }; do
 					end;
 					
 					request = nil;
-					database._busy = false;
 				end)();
 			end;
 			
@@ -248,7 +241,7 @@ local Database = { }; do
 			local busy = false;
 			
 			for _, database in next, Database.Schema do
-				busy = database._busy or #database._requests > 0;
+				busy = #database._requests > 0;
 				
 				if busy then
 					break;
