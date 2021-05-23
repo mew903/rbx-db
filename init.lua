@@ -195,11 +195,13 @@ local Database = { }; do
 				
 				coroutine.wrap(function()
 					local request = database._requests[1];
+					
+					local function update()
+						database._datastore:UpdateAsync(request._key, request._callback);
+					end;
 
 					repeat
-						local success = xpcall(function()
-							database._datastore:UpdateAsync(request._key, request._callback);
-						end, warn);
+						local success = xpcall(update, warn);
 
 						if not success then
 							if __DEBUG__ or __VERBOSE__ then
