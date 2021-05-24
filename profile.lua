@@ -130,7 +130,7 @@ local Profile = { }; do
 			ProfileDatabase:Out(string.format('Profile reconciled for: %s {KEY=`%s`}', self._player.Name, self._key));
 			
 			for _, attribute in next, reconciled do
-				ProfileDatabase:Out(string.format('\tATTR=`%s`{VALUE=`%s` -> `%s`}', 
+				ProfileDatabase:Out(string.format('\t\tATTR=`%s`{VALUE=`%s` -> `%s`}', 
 					attribute.key, tostring(attribute.old) or 'nil', tostring(attribute.new) or 'nil'));
 			end;
 		end;
@@ -149,12 +149,12 @@ local Profile = { }; do
 		
 		ProfileDatabase:Update(self._key, function()
 			return self._data;
+		end).Bind(function()
+			endSession.Submit();
 		end).Next(function()
 			if __DEBUG__ or __VERBOSE__ then
 				ProfileDatabase:Out(string.format('Profile data saved for: %s {KEY=`%s`}', self._player.Name, self._key));
 			end;
-		end).Bind(function()
-			endSession.Submit();
 		end).Submit();
 		
 		return endSession.Queue;
@@ -238,96 +238,97 @@ local Profile = { }; do
 		restrictCallback = Callback;
 	end;
 	
-	function Profile.new(Player, Template)
-		local isNewProfile = false;
-		local timeStamp = os.time();
+	setmetatable(Profile, {
+		-- Constructor: <RbxDb Alias>.Profile(Player, Template : dict)
+		__call = function(self, Player, Template)
+			local isNewProfile = false;
+			local timeStamp = os.time();
 
-		local playerDataKey = key(Player);
-		
-		if SessionDatabase:Fetch(playerDataKey) then
-			if __DEBUG__ or __VERBOSE__ then
-				SessionDatabase:Out(string.format('Active session detected for `%s` {KEY=`%s`}', Player.Name, playerDataKey));
-			else
-				return Player:Kick('Session error. Please try again later!');
-			end
-		else
-			SessionDatabase:Update(playerDataKey, function()
-				return true;
-			end).Next(function()
+			local playerDataKey = key(Player);
+
+			if SessionDatabase:FetchAsync(playerDataKey) then
 				if __DEBUG__ or __VERBOSE__ then
-					SessionDatabase:Out(string.format('Profile session started for: %s {KEY=`%s`}', Player.Name, playerDataKey));
-				end;
-			end).Submit();
-		end;
-
-		local profileData = ProfileDatabase:Fetch(playerDataKey);
-		
-		if not profileData then
-			if __VERBOSE__ then
-				ProfileDatabase:Out(string.format('Profile created for `%s` {KEY=`%s`}', Player.Name, playerDataKey));
+					SessionDatabase:Out(string.format('Active session detected for `%s` {KEY=`%s`}', Player.Name, playerDataKey));
+				else
+					return Player:Kick('Session error. Please try again later!');
+				end
+			else
+				SessionDatabase:Update(playerDataKey, function()
+					return true;
+				end).Next(function()
+					if __DEBUG__ or __VERBOSE__ then
+						SessionDatabase:Out(string.format('Profile session started for: %s {KEY=`%s`}', Player.Name, playerDataKey));
+					end;
+				end).Submit();
 			end;
-			
-			isNewProfile = true;
-			profileData = copy(Template);
-		end;
 
-		local profile = setmetatable({
-			_player = Player;
-			_data = profileData;
-			_key = playerDataKey;
-			_template = Template;
-			
-			_changehooks = { };
-			_listeners = { Player };
-			_onchange = Instance.new('RemoteEvent');
-		}, Profile);
-		
-		local onChange = profile._onchange; do
-			onChange.Name = 'ProfileChanged';
-			onChange.Parent = Player;
-		end;
-		
-		local access = Instance.new('RemoteFunction'); do
-			access.OnServerInvoke = function(Invoker, RequestType, ...)
-				local requestType = string.lower(RequestType);
-				
-				if requestType == 'set' then
-					if Invoker ~= Player then
-						return restrict(Invoker);
-					end;
-					
-					local key, value = ...;
-					assert(key and typeof(key) == 'string', 'bad argument #1 string expected');
-					assert(value, 'bad argument #2 anything except nil expected');
-					
-					return profile:Set(key, value);
-				elseif requestType == 'get' then
-					if __RESTRICT_GET__ and Invoker ~= Player then
-						return restrict(Invoker);
-					end;
-					
-					local response = { };
-					
-					for _, key in next, { ... } do
-						response[key] = profile:Get(key);
-					end;
-					
-					return response;
+			local profileData = ProfileDatabase:FetchAsync(playerDataKey);
+
+			if not profileData then
+				if __VERBOSE__ then
+					ProfileDatabase:Out(string.format('Profile created for `%s` {KEY=`%s`}', Player.Name, playerDataKey));
 				end;
+
+				isNewProfile = true;
+				profileData = copy(Template);
 			end;
-			
-			access.Name = 'ProfileRequest';
-			access.Parent = Player;
-		end;
 
-		if __AUTO_RECONCILE__ and not isNewProfile then
-			profile:Reconcile();
-		end;
+			local profile = setmetatable({
+				_player = Player;
+				_data = profileData;
+				_key = playerDataKey;
+				_template = Template;
 
-		return profile, isNewProfile;
-	end;
-	
-	--
+				_changehooks = { };
+				_listeners = { Player };
+				_onchange = Instance.new('RemoteEvent');
+			}, Profile);
+
+			local onChange = profile._onchange; do
+				onChange.Name = 'ProfileChanged';
+				onChange.Parent = Player;
+			end;
+
+			local access = Instance.new('RemoteFunction'); do
+				access.OnServerInvoke = function(Invoker, RequestType, ...)
+					local requestType = string.lower(RequestType);
+
+					if requestType == 'set' then
+						if Invoker ~= Player then
+							return restrict(Invoker);
+						end;
+
+						local key, value = ...;
+						assert(key and typeof(key) == 'string', 'bad argument #1 string expected');
+						assert(value, 'bad argument #2 anything except nil expected');
+
+						return profile:Set(key, value);
+					elseif requestType == 'get' then
+						if __RESTRICT_GET__ and Invoker ~= Player then
+							return restrict(Invoker);
+						end;
+
+						local response = { };
+
+						for _, key in next, { ... } do
+							response[key] = profile:Get(key);
+						end;
+
+						return response;
+					end;
+				end;
+
+				access.Name = 'ProfileRequest';
+				access.Parent = Player;
+			end;
+
+			if __AUTO_RECONCILE__ and not isNewProfile then
+				profile:Reconcile();
+			end;
+
+			return profile, isNewProfile;
+		end;
+	});
 	
 	Profile.Mock = { };
 	Profile.Mock.__index = Profile.Mock;
@@ -362,21 +363,23 @@ local Profile = { }; do
 		self._data[Key] = Value;
 	end;
 	
-	function Profile.Mock.new(Player, Template)
-		local mockKey = key(Player);
-		
-		if __DEBUG__ or __VERBOSE__ then
-			SessionDatabase:Out('MOCK', string.format('Profile session started for: %s {KEY=`%s`}', Player.Name, mockKey));
-			ProfileDatabase:Out('MOCK', string.format('Profile session started for: %s {KEY=`%s`}', Player.Name, mockKey));
+	setmetatable(Profile.Mock, {
+		__call = function(Player, Template)
+			local mockKey = key(Player);
+
+			if __DEBUG__ or __VERBOSE__ then
+				SessionDatabase:Out('MOCK', string.format('Profile session started for: %s {KEY=`%s`}', Player.Name, mockKey));
+				ProfileDatabase:Out('MOCK', string.format('Profile session started for: %s {KEY=`%s`}', Player.Name, mockKey));
+			end;
+
+			return setmetatable({
+				_key = mockKey;
+				_player = Player;
+				_template = Template;
+				_data = copy(Template);
+			}, Profile.Mock), true;
 		end;
-		
-		return setmetatable({
-			_key = mockKey;
-			_player = Player;
-			_template = Template;
-			_data = copy(Template);
-		}, Profile.Mock), true;
-	end;
+	});
 end;
 
 return Profile;
