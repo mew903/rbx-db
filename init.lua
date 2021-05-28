@@ -34,13 +34,16 @@ local Database = { }; do
 		repeat
 			elapsed += RunService.Heartbeat:Wait();
 		until elapsed > t + (f and f() or 0);
+		
+		return elapsed;
 	end;
 	
 	function Database.Fetch(self, Key)
 		local request = {
-			_key = Key;
 			_next = { };
 			_bindings = { };
+			
+			_key = Key;
 			_timestamp = os.clock();
 		};
 		
@@ -107,15 +110,16 @@ local Database = { }; do
 	
 	local empty, space = '', ' ';
 	
-	function Database.Out(self, header, message)
-		warn(string.format('[RBXDB][%s]%s%s', self._key, message and header .. space or space .. header, message or empty));
+	function Database.Out(self, Header, Message)
+		warn(string.format('[RBXDB][%s]%s%s', self._key, Message and Header .. space or space .. Header, Message or empty));
 	end;
 	
 	function Database.Update(self, Key, UpdateCallback)
 		local request = {
-			_key = Key;
 			_next = { };
 			_bindings = { };
+			
+			_key = Key;
 			_submitted = false;
 			_processing = false;
 			_timestamp = os.clock();
@@ -178,7 +182,26 @@ local Database = { }; do
 		local keystamp = self._updates[Key];
 		local throttle = keystamp and os.clock() - keystamp or 0;
 
-		yield(throttle, rpm);
+		return yield(throttle, rpm);
+	end;
+	
+	function Database.__init(DataStoreName, Scope, IsOrderedDataStore)
+		local database = setmetatable({
+			_busy = false;
+
+			_fetches = { };
+			_updates = { };
+			_requests = { };
+
+			_key = DataStoreName;
+			_scope = Scope or '';
+			_datastore = IsOrderedDataStore and DataStoreService:GetOrderedDataStore(DataStoreName, Scope)
+				or DataStoreService:GetDataStore(DataStoreName, Scope);
+		}, Database);
+
+		Database.Schema[database._key] = database;
+
+		return database;
 	end;
 	
 	function Database.__tostring(self)
@@ -192,21 +215,7 @@ local Database = { }; do
 		-- Constructor: <RbxDb Alias>(string DataStoreName, string Scope)
 		
 		__call = function(self, DataStoreName, Scope)
-			local database = setmetatable({
-				_busy = false;
-				
-				_fetches = { };
-				_updates = { };
-				_requests = { };
-				
-				_datastore = DataStoreService:GetDataStore(DataStoreName, Scope);
-				_scope = Scope or nil;
-				_key = DataStoreName;
-			}, Database);
-			
-			Database.Schema[database._key] = database;
-
-			return database;
+			return Database.__init(DataStoreName, Scope);
 		end;
 		
 		__index = function(self, Key)
@@ -229,6 +238,7 @@ local Database = { }; do
 	});
 	
 	-- the on/off switch
+	-- don't touch it
 	local running = true;
 	
 	-- stale timestamp janitor
