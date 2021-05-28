@@ -284,43 +284,41 @@ local Profile = { }; do
 				_onchange = Instance.new('RemoteEvent');
 			}, Profile);
 
-			local onChange = profile._onchange; do
-				onChange.Name = 'ProfileChanged';
-				onChange.Parent = Player;
-			end;
+			local onChange = profile._onchange;
+			onChange.Name = 'ProfileChanged';
+			onChange.Parent = Player;
 
-			local access = Instance.new('RemoteFunction'); do
-				access.OnServerInvoke = function(Invoker, RequestType, ...)
-					local requestType = string.lower(RequestType);
+			local access = Instance.new('RemoteFunction');
+			access.Name = 'ProfileRequest';
+			access.OnServerInvoke = function(Invoker, RequestType, ...)
+				local requestType = string.lower(RequestType);
 
-					if requestType == 'set' then
-						if Invoker ~= Player then
-							return restrict(Invoker);
-						end;
-
-						local key, value = ...;
-						assert(key and typeof(key) == 'string', 'bad argument #1 string expected');
-						assert(value, 'bad argument #2 anything except nil expected');
-
-						return profile:Set(key, value);
-					elseif requestType == 'get' then
-						if __RESTRICT_GET__ and Invoker ~= Player then
-							return restrict(Invoker);
-						end;
-
-						local response = { };
-
-						for _, key in next, { ... } do
-							response[key] = profile:Get(key);
-						end;
-
-						return response;
+				if requestType == 'set' then
+					if Invoker ~= Player then
+						return restrict(Invoker);
 					end;
-				end;
 
-				access.Name = 'ProfileRequest';
-				access.Parent = Player;
+					local key, value = ...;
+					assert(key and typeof(key) == 'string', 'bad argument #1 string expected');
+					assert(value, 'bad argument #2 anything except nil expected');
+
+					return profile:Set(key, value);
+				elseif requestType == 'get' then
+					if __RESTRICT_GET__ and Invoker ~= Player then
+						return restrict(Invoker);
+					end;
+
+					local response = { };
+
+					for _, key in next, { ... } do
+						response[key] = profile:Get(key);
+					end;
+
+					return response;
+				end;
 			end;
+			
+			access.Parent = Player;
 
 			if __AUTO_RECONCILE__ and not isNewProfile then
 				profile:Reconcile();
@@ -330,56 +328,6 @@ local Profile = { }; do
 		end;
 	});
 	
-	Profile.Mock = { };
-	Profile.Mock.__index = Profile.Mock;
-	
-	function Profile.Mock.Get(self, Key)
-		if __VERBOSE__ then
-			ProfileDatabase:Out('MOCK', string.format('FETCH `%s`{%s}', self._key, Key));
-		end;
-		
-		return self._data[Key];
-	end;
-	
-	function Profile.Mock.Reconcile(self)
-		-- pass
-		if __VERBOSE__ then
-			ProfileDatabase:Out('MOCK', string.format('Profile reconciled for: %s {KEY=`%s`}', self._player.Name, self._key));
-		end;
-	end;
-	
-	function Profile.Mock.Release(self)
-		-- pass
-		if __DEBUG__ or __VERBOSE__ then
-			SessionDatabase:Out('MOCK', string.format('Profile session released for: %s {KEY=`%s`}', self._player.Name, self._key));
-		end;
-	end;
-	
-	function Profile.Mock.Set(self, Key, Value)
-		if __VERBOSE__ then
-			ProfileDatabase:Out('MOCK', string.format('SET `%s`{%s=%s}', self._key, Key, Value));
-		end;
-		
-		self._data[Key] = Value;
-	end;
-	
-	setmetatable(Profile.Mock, {
-		__call = function(Player, Template)
-			local mockKey = key(Player);
-
-			if __DEBUG__ or __VERBOSE__ then
-				SessionDatabase:Out('MOCK', string.format('Profile session started for: %s {KEY=`%s`}', Player.Name, mockKey));
-				ProfileDatabase:Out('MOCK', string.format('Profile session started for: %s {KEY=`%s`}', Player.Name, mockKey));
-			end;
-
-			return setmetatable({
-				_key = mockKey;
-				_player = Player;
-				_template = Template;
-				_data = copy(Template);
-			}, Profile.Mock), true;
-		end;
-	});
 end;
 
 return Profile;
