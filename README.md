@@ -4,8 +4,10 @@
 RbxDb is a simple, lightweight, queue-based DataStore wrapper for the Roblox engine.
 
 ## Features
-- Automatic request throttling
-- Optional data caching 
+- Automatic request throttling via internal queue
+- Ensures server won't close until all requests in queue have been fulfilled
+- Optional data caching on either entire DataStores _or_ on a key-to-key basis
+- Utilize builders similar to Promises for more precise data handling, including binding & chaining requests
 
 ## Syntax
 `RbxDb(DataStoreName : string, DataStoreScope : string)`
