@@ -23,7 +23,7 @@ RbxProfile is an extension of RbxDb which intends to provide a simple and flexib
 ## Syntax
 `RbxDb.Profile(Player : Instance, Template : dict)`
 
-# RbxDb Console _(soon)_
+# RbxDb Console
 RbxDb Console is a 3-in-1 interface for Roblox game developers to visualize their DataStore activity and provide solutions for common management tasks
 
 ## Features
