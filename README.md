@@ -1,6 +1,5 @@
 # RbxDb
-
-## A simple yet powerful solution for Roblox DataStores
+## _A simple yet powerful solution for Roblox DataStores_
 RbxDb is a simple, lightweight, queue-based DataStore wrapper for the Roblox engine.
 
 ## Features
