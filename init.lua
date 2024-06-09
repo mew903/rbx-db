@@ -1,355 +1,299 @@
 -- RbxDb
--- mew903, 2021
+-- mew903, 2024
+assert(game:GetService('RunService'):IsServer(), 'RbxDb can only be used in Server Scripts')
 
--- flags
-__DEBUG__ = true;
-__VERBOSE__ = true;
+-- TODO: rollbacks using memory store service
 
-local Players = game:GetService('Players');
-local RunService = game:GetService('RunService');
-local DataStoreService = game:GetService('DataStoreService');
+-- debug flags
+local __DEBUG__ = true -- turns all debug flags on
+local __PING__ = false -- ping when a new connection is made
+local __VERBOSE__ = false -- print debug info
+local __WARNINGS__ = true -- warn for misuse / code smell
 
-local Database = { }; do
-	Database.Schema = { };
-	Database.__index = Database;
-	
-	local function clear(dict)
-		for key, value in next, dict do
-			if typeof(value) == 'table' then
-				clear(value);
-			end;
-			
-			dict[key] = nil;
-		end;
-	end;
-	
-	-- calculates requests per minute for unique keys
-	local function rpm()
-		return 60 / (60 + (#Players:GetPlayers() * 10));
-	end;
-	
-	local function yield(t, f)		
-		local elapsed = 0;
+-- usage flags
+local DEFAULT_SCOPE = 'global' -- roblox default
+local MAX_REQUEST_RETRIES = 10
 
-		repeat
-			elapsed += RunService.Heartbeat:Wait();
-		until elapsed > t + (f and f() or 0);
-		
-		return elapsed;
-	end;
-	
-	function Database.Fetch(self, Key)
-		local request = {
-			_next = { };
-			_bindings = { };
-			
-			_key = Key;
-			_timestamp = os.clock();
-		};
-		
-		function request.Bind(Callback)
-			table.insert(request._bindings, Callback);
-		end;
-		
-		function request.Destroy()
-			clear(request);
-		end;
-		
-		function request.Next(Callback)
-			table.insert(request._next, Callback);
-		end;
-		
-		function request.Submit()
-			coroutine.wrap(function()
-				local value = self:FetchAsync(Key);
-				
-				for _, callback in next, request._next do
-					callback(value, os.clock() - request._timestamp);
-				end;
-			end)();
-			
-			for _, callback in next, request._bindings do
-				callback();
-			end;
-			
-			return request;
-		end;
-		
-		return request;
-	end;
+-- types
+type map<K, V> = { [K]: V }
+type array<T> = map<number, T>
 
-	function Database.FetchAsync(self, Key)
-		if self._fetches[Key] then
-			repeat
-				RunService.Heartbeat:Wait();
-			until os.clock() - self._fetches[Key] > rpm();
-		end;
-		
-		local value; do
-			local function get()
-				value = self._datastore:GetAsync(Key);
-			end;
-			
-			repeat
-				local success = xpcall(get, warn);
-				
-				if not success then
-					if __DEBUG__ or __VERBOSE__ then
-						warn(string.format('[RBXDB] Fetch request for `%s`{KEY=`%s`} failed. Retrying in 6 seconds...', self._key, Key));
-					end;
-					
-					yield(6);
-				end;
-			until success;
-			
-			self._fetches[Key] = os.clock();
-		end;
-		
-		return value;
-	end;
-	
-	local empty, space = '', ' ';
-	
-	function Database.Out(self, Header, Message)
-		warn(string.format('[RBXDB][%s]%s%s', self._key, Message and Header .. space or space .. Header, Message or empty));
-	end;
-	
-	function Database.Update(self, Key, UpdateCallback)
-		local request = {
-			_next = { };
-			_bindings = { };
-			
-			_key = Key;
-			_submitted = false;
-			_processing = false;
-			_timestamp = os.clock();
-			_callback = UpdateCallback;
-		};
+type weakmap<K, V> = typeof(setmetatable({ } :: map<K, V>, { } :: {
+  __metatable: boolean,
+  __mode: string,
+}))
 
-		function request.Bind(BindCallback)
-			table.insert(request._bindings, BindCallback);
+export type key = number | string
+export type data = number | string | map<key, data>
+export type version = number | string
 
-			return request;
-		end;
-		
-		function request.Destroy()
-			while request._processing do
-				RunService.Heartbeat:Wait();
-			end;
-			
-			clear(request);
-		end;
+-- callbacks
+type callback<A..., R...> = (A...) -> R...
+type async<A..., R...> = callback<(RbxDb, key, A...), R...>
+type result<V, A...> = callback<(V, A...)>
 
-		function request.Next(NextCallback)
-			table.insert(request._next, NextCallback);
+-- interfaces
+type RbxDbImpl = {
+  -- async class methods
+  DeleteAsync: (self: RbxDb, key: key) -> data?,
+  FetchAsync: (self: RbxDb, key: key, retry: boolean?, opt: DataStoreGetOptions?) -> data?,
+  PingAsync: (self: RbxDb) -> (boolean, number),
+  RollbackAsync: (self: RbxDb, key: key, version: version) -> data?,
+  SetAsync: (self: RbxDb, key: key, value: data, uids: array<number>?, opt: DataStoreSetOptions?) -> string,
+  UpdateAsync: (self: RbxDb, key: key, transform: (data, DataStoreKeyInfo) -> data) -> (data, DataStoreKeyInfo),
+  -- class methods
+  Delete: (self: RbxDb, key: key) -> (value: result<data?>) -> (),
+  Fetch: (self: RbxDb, key: key, retry: boolean?, opt: DataStoreGetOptions?) -> (callback: result<data?>) -> (),
+  Ping: (self: RbxDb) -> (callback: callback<(boolean, number)>) -> (),
+  Rollback: (self: RbxDb, key: key) -> (version: version) -> result<data?>,
+  Set: (self: RbxDb, key: key, uids: array<number>?, opt: DataStoreSetOptions?) -> (value: data, callback: result<version?>?) -> (),
+  Update: (self: RbxDb, key: key) -> (transform: (data, DataStoreKeyInfo) -> data, callback: result<data?, DataStoreKeyInfo>?) -> (),
+  -- metamethods
+  __index: RbxDbImpl,
+  __metatable: boolean,
+  __tostring: (self: RbxDb) -> string,
+  -- static methods
+  connect: (name: string, scope: string?, ordered: boolean?, opt: DataStoreOptions?) -> RbxDb,
+}
 
-			return request;
-		end;
+-- "classes"
+export type RbxDb = typeof(setmetatable({ } :: {
+  datastore: DataStore,
+  keys: weakmap<string, number>,
+  locked: weakmap<string, boolean>,
+  name: string,
+  ordered: boolean,
+  scope: string,
+  print: <A...>(A...) -> (),
+  warn: <A...>(A...) -> (),
+}, { } :: RbxDbImpl))
 
-		function request.Queue()
-			if self._submitted then
-				return table.find(self._requests, request);
-			end;
-			
-			return -1;
-		end;
+-- constants
+-- you can remove these
+local assert = assert
+local print = print
+local select = select
+local setmetatable = setmetatable
+local tick = tick
+local tostring = tostring
+local xpcall = xpcall
+local warn = warn
+-- you can replace these
+local clock = os.clock
+local empty = { }
+local floor = math.floor
+local pack = table.pack
+local resume = coroutine.resume
+local thread = coroutine.create
+local wait = task.wait
+-- error messages
+local ORDERED_INT_ONLY = "can only store postive integers in OrderedDataStore"
 
-		function request.Submit()
-			table.insert(self._requests, request);
-			self._submitted = true;
+-- code
+local Players = game:GetService('Players') 
+local DataStoreService = game:GetService('DataStoreService')
 
-			for _, callback in next, request._bindings do
-				callback();
-			end;
-			
-			return request;
-		end;
+-- TODO: cache wrapper, rollbacks
+-- local MemoryStoreService = game:GetService('MemoryStoreService')
 
-		return request;
-	end;
-	
-	function Database.UpdateAsync(self, Key, UpdateCallback)
-		local request = self:Update(Key, UpdateCallback).Submit();
+if __DEBUG__ then
+  __PING__ = true
+  __VERBOSE__ = true
+  __WARNINGS__ = true
+end
 
-		repeat
-			RunService.Heartbeat:Wait();
-		until not request.Queue();
-		
-		return request;
-	end;
-	
-	function Database.Yield(self, Key)
-		local keystamp = self._updates[Key];
-		local throttle = keystamp and os.clock() - keystamp or 0;
+local function datastore(name: string, scope: string, ordered: boolean?, opt: DataStoreOptions?): DataStore
+  if ordered then
+    return DataStoreService:GetOrderedDataStore(name, scope)
+  end
+  return DataStoreService:GetDataStore(name, scope, opt)
+end
 
-		return yield(throttle, rpm);
-	end;
-	
-	function Database.__init(DataStoreName, Scope, IsOrderedDataStore)
-		local database = setmetatable({
-			_busy = false;
+local function deleteAsync(source: RbxDb, key: key): data?
+  return source.datastore:RemoveAsync(tostring(key))
+end
 
-			_fetches = { };
-			_updates = { };
-			_requests = { };
+local function isInt(n: unknown): boolean
+  return type(n) == 'number' and floor(n) == n
+end
 
-			_key = DataStoreName;
-			_scope = Scope or '';
-			_datastore = IsOrderedDataStore and DataStoreService:GetOrderedDataStore(DataStoreName, Scope)
-				or DataStoreService:GetDataStore(DataStoreName, Scope);
-		}, Database);
+local function request<A..., R...>(f: async<A..., R...>, source: RbxDb, key: key, retry: boolean, ...: A...): R...
+  local reponse
+  local tries = 0
+  repeat
+    tries += 1
+    wait(tries * (60 / (60 + (#Players:GetPlayers() * 10))))
+    reponse = { select(2, xpcall(f, source.warn, source, key, ...)) }
+  until not retry or tries == MAX_REQUEST_RETRIES or #reponse > 0
+  if tries == MAX_REQUEST_RETRIES then
+    -- TODO: use memory service for request fallback queue
+  end
+  return unpack(reponse)
+end
 
-		Database.Schema[database._key] = database;
+local function round(n: number, d: number): number
+  return floor(n * 10 ^ d) / 10 ^ d
+end
 
-		return database;
-	end;
-	
-	function Database.__tostring(self)
-		return self._scope and string.format('`%s`{SCOPE=%s}', self._key, self._scope) or self._key;
-	end;
-	
-	-- private table avoids cyclic references for child modules
-	local modules = { };
-	
-	setmetatable(Database, {
-		-- Constructor: <RbxDb Alias>(string DataStoreName, string Scope)
-		
-		__call = function(self, DataStoreName, Scope)
-			return Database.__init(DataStoreName, Scope);
-		end;
-		
-		__index = function(self, Key)
-			local module = rawget(modules, Key) or rawget(self, Key);
-			
-			if not module then
-				local moduleScript = script:FindFirstChild(Key);
-				
-				if moduleScript and moduleScript:IsA('ModuleScript') then
-					module = require(moduleScript);
-					
-					rawset(modules, Key, module);
-				else
-					error(string.format('[RBXDB]`%s` is not a valid ModuleScript', Key));
-				end;
-			end;
-			
-			return module;
-		end;
-	});
-	
-	-- the on/off switch
-	-- don't touch it
-	local running = true;
-	
-	-- stale timestamp janitor
-	coroutine.wrap(function()
-		local function clockOut()
-			return not running and -10 or 0;
-		end;
-		
-		local function sweep(TimestampTable, CleanAfter)
-			for key, timestamp in next, TimestampTable do
-				if os.clock() - timestamp > CleanAfter then
-					TimestampTable[key] = nil;
-				end;
-			end;
-		end;
-		
-		local sweepFrequency = 10;
-		
-		while running do
-			for _, database in next, Database.Schema do
-				coroutine.wrap(function()
-					sweep(database._fetches, sweepFrequency);
-					sweep(database._updates, sweepFrequency);
-				end)();
-			end;
+local function fetchAsync(source: RbxDb, key: key, opt: DataStoreGetOptions?): data?
+  return source.datastore:GetAsync(tostring(key), opt)
+end
 
-			yield(10, clockOut);
-		end;
-	end)();
-	
-	-- start request runner
-	coroutine.wrap(function()
-		if __VERBOSE__ then
-			warn('[RBXDB] Starting RbxDb')
-		end;
-		
-		while running do
-			for _, database in next, Database.Schema do
-				if database._busy or #database._requests == 0 then
-					continue;
-				end;
-				
-				database._busy = true;
-				
-				coroutine.wrap(function()
-					local request = database._requests[1];
-					
-					local function update()
-						database._datastore:UpdateAsync(request._key, request._callback);
-					end;
+local function setAsync(source: RbxDb, key: key, value: data, uids: array<number>?, opt: DataStoreSetOptions?): string
+  if source.ordered then
+    return source.datastore:SetAsync(tostring(key), value, nil, opt)
+  end
+  return source.datastore:SetAsync(tostring(key), value, uids or empty, opt)
+end
 
-					repeat
-						local success = xpcall(update, warn);
+local function updateAsync(source: RbxDb, key: key, value: result<data, DataStoreKeyInfo>): (data, DataStoreKeyInfo)
+  return source.datastore:UpdateAsync(tostring(key), value)
+end
 
-						if not success then
-							if __DEBUG__ or __VERBOSE__ then
-								warn(string.format('[RBXDB] Update request for `%s`{KEY=`%s`} failed. Retrying in 6 seconds...',
-									database._key, request._key));
-							end;
+local RbxDb: RbxDbImpl = { } :: RbxDbImpl do
+  function RbxDb.DeleteAsync(self, key)
+    return request(deleteAsync, self, key, true)
+  end
 
-							yield(6);
-						end;
-					until success;
-					
-					local now = os.clock();
-					local elapsed = now - request._timestamp;
-					
-					database._updates[request._key] = now;
-					
-					if __VERBOSE__ then
-						warn(string.format('[RBXDB] Update request for `%s`{KEY=`%s`} took %.2fs', 
-							database._key, request._key, elapsed));
-					end;
-					
-					for index, callback in ipairs(request._next) do
-						callback(elapsed);
-					end;
+  function RbxDb.FetchAsync(self, key, retry, opt)
+    return request(fetchAsync, self, key, retry or false, opt)
+  end
 
-					database:Yield(request._key);
-					table.remove(database._requests, table.find(database._requests, request));
-					
-					database._busy = false;
-				end)();
-			end;
-			
-			RunService.Heartbeat:Wait();
-		end;
-	end)();
+  function RbxDb.PingAsync(self)
+    local utime = clock()
+    local alive = xpcall(setAsync, self.warn, self, '__ping__', floor(utime))
+    local well = xpcall(fetchAsync, self.warn, self, '__ping__')
+    return alive and well, round(clock() - utime, 3) -- should be less than 1s if alls good
+  end
 
-	-- keep the server from closing before all requests have been processed
-	game:BindToClose(function()
-		repeat
-			local busy = false;
-			
-			for _, database in next, Database.Schema do
-				busy = database._busy or #database._requests > 0;
-				
-				if busy then
-					break;
-				end;
-			end;
-			
-			RunService.Heartbeat:Wait();
-		until busy == false;
+  function RbxDb.RollbackAsync(self, key, version)
+    error(`[RbxDb][{ self }] RbxDb::Rollback not yet implemented`)
+  end
 
-		running = false;
+  function RbxDb.SetAsync(self, key, value, uids, opt)
+    assert(not self.ordered or isInt(value), `arg #1 invalid: { ORDERED_INT_ONLY }`)
+    return request(setAsync, self, key, true, value, uids, opt)
+  end
 
-		if __VERBOSE__ then
-			warn('[RBXDB] Exited successfully');
-		end;
-	end);
-end;
+  function RbxDb.UpdateAsync(self, key, transform)
+    return request(updateAsync, self, key, true, function(value, info)
+      assert(not self.ordered or isInt(value), `arg #1 invalid: { ORDERED_INT_ONLY }`)
+      transform(value, info)
+    end)
+  end
 
-return Database;
+  function RbxDb.Delete(self, key)
+    return function(callback)
+      resume(thread(function()
+        callback(self:DeleteAsync(key))
+      end))
+    end
+  end
+
+  function RbxDb.Fetch(self, key, retry, opt)
+    return function(callback)
+      resume(thread(function()
+        callback(self:FetchAsync(key, retry, opt))
+      end))
+    end
+  end
+
+  function RbxDb.Ping(self)
+    return function(callback)
+      resume(thread(function()
+        callback(self:PingAsync())
+      end))
+    end
+  end
+
+  function RbxDb.Rollback(self, key)
+    error(`[RbxDb][{ self }] RbxDb::Rollback not yet implemented`)
+  end
+
+  function RbxDb.Set(self, key, uids, opt)
+    return function(value, callback)
+      resume(thread(function()
+        if type(callback) == 'function' then
+          if self.ordered then
+            self.warn('OrderedDataStore does not support versioning, passing null to callback')
+          end
+          callback(self:SetAsync(key, value, uids, opt))
+          return
+        end
+        self:SetAsync(key, value, uids, opt)
+      end))
+    end
+  end
+
+  function RbxDb.Update(self, key)
+    return function(transform, callback)
+      resume(thread(function()
+        if type(callback) == 'function' then
+          callback(self:UpdateAsync(key, transform))
+          return
+        end
+        self:UpdateAsync(key, transform)
+      end))
+    end
+  end
+
+  RbxDb.__index = RbxDb
+  RbxDb.__metatable = true
+  RbxDb.__tostring = function(self)
+    return `{ self.name }@{ self.scope }{ self.ordered and '.ordered' or '' }`
+  end
+
+  -- use existing connections if possible, e.g. to prevent unnecessary pings
+  -- but if we're connecting infrequently or on-demand then let luau gc do its thing
+  local schema = setmetatable({ }, {
+    __index = function(self, k)
+      return setmetatable({ }, {
+        __metatable = true,
+        __mode = 'kv',
+      })
+    end,
+    __metatable = true,
+    __mode = 'kv',
+  })
+
+  function RbxDb.connect(name, scope, ordered, opt)
+    assert(not ordered or not opt, 'arg #4 invalid: cannot pass DataStoreOptions to OrderedDataStore')
+    local scope = scope or DEFAULT_SCOPE
+    local connection = schema[name][scope]
+    if connection then
+      return connection
+    end
+    connection = setmetatable({
+      datastore = datastore(name, scope, ordered, opt),
+      keys = setmetatable({ }, {
+        __metatable = true,
+        __mode = 'kv',
+      }),
+      locked = setmetatable({ }, {
+        __metatable = true,
+        __mode = 'kv',
+      }),
+      name = name,
+      ordered = ordered or false,
+      scope = scope,
+      print = function<A...>(...: A...)
+        print(`[RbxDb][{ connection }]`, ...)
+      end,
+      warn = function<A...>(...: A...)
+        warn(`[RbxDb][{ connection }]`, ...)
+      end,
+    }, RbxDb)
+    schema[name][scope] = connection
+    if __PING__ then
+      local result, elapsed = connection:PingAsync()
+      if result then
+        connection.print(`connected (elapsed: { elapsed }s)`)
+      else
+        connection.warn(`connection failed (elapsed: { elapsed }s)`)
+      end
+    end
+    return connection
+  end
+end
+
+return RbxDb
