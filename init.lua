@@ -1,3 +1,4 @@
+--!strict
 -- RbxDb
 -- mew903, 2021 - 2024
 assert(game:GetService('RunService'):IsServer(), 'RbxDb can only be used in Server Scripts')
@@ -26,11 +27,6 @@ local TIME_FORMAT = 'YYYY-MM-DD HH12:MI:SS XM'
 -- types
 type map<K, V> = { [K]: V }
 type array<T> = map<number, T>
-
-type weakmap<K, V> = typeof(setmetatable({ } :: map<K, V>, { } :: {
-  __metatable: boolean,
-  __mode: string,
-}))
 
 export type key = string
 export type data = boolean | number | string | map<key | number, data>
@@ -67,9 +63,12 @@ type RbxDbImpl = {
 
 -- "classes"
 export type RbxDb = typeof(setmetatable({ } :: {
+  access: typeof(setmetatable({ } :: map<key, number>, { } :: {
+    __index: () -> number,
+    __metatable: boolean,
+  })),
   datastore: DataStore,
-  keys: weakmap<key, number>,
-  locked: weakmap<key, boolean>,
+  locked: map<key, boolean?>, -- TODO: use memory service to make parallel hash map
   name: string,
   ordered: boolean,
   scope: string,
@@ -105,7 +104,7 @@ local W_ORDERED_SET_VERS = 'OrderedDataStore does not support versioning, passin
 -- constants
 local EMPTY = { }
 local NULL_VALUE = '__RBXDB_NULL__'
--- volatiles
+-- volatile
 local requests = 0
 
 -- code
@@ -154,10 +153,10 @@ local function fetchAsync(source: RbxDb, key: key, opt: DataStoreGetOptions?): d
   return wrapNull(source.datastore:GetAsync(key, opt))
 end
 
-local function request<A..., R...>(f: async<A..., R...>, source: RbxDb, key: key, retry: boolean, ...: A...): R...
-  source.wait(key) -- wait for key to free
-  source.keys[key] = tick()
+local function request<A..., R...>(f: async<A..., R...>, source: RbxDb, key: key, retry: boolean, lock: boolean, ...: A...): R...
   requests += 1
+  source.wait(key) -- wait for key to free
+  source.access[key], source.locked[key] = tick(), lock
   local status, response
   local tries = 0
   repeat
@@ -176,6 +175,7 @@ local function request<A..., R...>(f: async<A..., R...>, source: RbxDb, key: key
       end
     until not null
   end
+  source.locked[key], source.access[key] = nil, tick()
   requests -= 1
   return unpack(response)
 end
@@ -193,11 +193,11 @@ end
 
 local RbxDb: RbxDbImpl = { } :: RbxDbImpl do
   function RbxDb.DeleteAsync(self, key)
-    return request(deleteAsync, self, key, true)
+    return request(deleteAsync, self, key, true, true)
   end
 
   function RbxDb.FetchAsync(self, key, retry, opt)
-    return request(fetchAsync, self, key, retry or false, opt)
+    return request(fetchAsync, self, key, retry or false, false, opt)
   end
 
   function RbxDb.PingAsync(self)
@@ -213,11 +213,11 @@ local RbxDb: RbxDbImpl = { } :: RbxDbImpl do
 
   function RbxDb.SetAsync(self, key, value, uids, opt)
     assert(not self.ordered or isInt(value), `arg #1 invalid: { E_ORDERED_INT_ONLY }`)
-    return request(setAsync, self, key, true, value, uids, opt)
+    return request(setAsync, self, key, true, true, value, uids, opt)
   end
 
   function RbxDb.UpdateAsync(self, key, transform)
-    return request(updateAsync, self, key, true, function(value, info)
+    return request(updateAsync, self, key, true, true, function(value, info)
       assert(not self.ordered or isInt(value), `arg #1 invalid: { E_ORDERED_INT_ONLY }`)
       transform(value, info)
     end)
@@ -303,15 +303,12 @@ local RbxDb: RbxDbImpl = { } :: RbxDbImpl do
     -- is this a typecheck hack?
     local connection: RbxDb
     connection = schema[name][scope] or setmetatable({
+      access = setmetatable({ }, {
+        __index = tick,
+        __metatable = true,
+      }),
       datastore = datastore(name, scope, ordered, opt),
-      keys = setmetatable({ }, {
-        __metatable = true,
-        __mode = 'v',
-      }),
-      locked = setmetatable({ }, {
-        __metatable = true,
-        __mode = 'v',
-      }),
+      locked = { }, -- TODO: use memory service to make parallel hash map
       name = name,
       ordered = ordered or false,
       scope = scope,
@@ -325,7 +322,7 @@ local RbxDb: RbxDbImpl = { } :: RbxDbImpl do
       end,
       wait = function(key: key)
         local elapsed = 0
-        while connection.locked[key] or (tick() - (connection.keys[key] or 0)) < KEY_REQUEST_THROTTLE do
+        while connection.locked[key] or (tick() - connection.access[key]) < KEY_REQUEST_THROTTLE do
           elapsed += wait(6);
         end
         return elapsed
