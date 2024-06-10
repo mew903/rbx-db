@@ -351,9 +351,9 @@ local RbxDb: RbxDbImpl = { } :: RbxDbImpl do
   end
 
   game:BindToClose(function()
-    while requests > 0 do
+    repeat
       wait(1)
-    end
+    until requests == 0
   end)
 end
 
