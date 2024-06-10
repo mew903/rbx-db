@@ -1,4 +1,3 @@
---!strict
 -- RbxDb
 -- mew903, 2021 - 2024
 assert(game:GetService('RunService'):IsServer(), 'RbxDb can only be used in Server Scripts')
@@ -128,6 +127,10 @@ end
 
 local function wrapNull<T, R...>(value: T, ...: R...): (T | typeof(NULL_VALUE), R...)
   return type(value) ~= nil and value or NULL_VALUE, ...
+end
+
+local function zero(): number
+  return 0
 end
 
 if __DEBUG__ then
@@ -304,7 +307,7 @@ local RbxDb: RbxDbImpl = { } :: RbxDbImpl do
     local connection: RbxDb
     connection = schema[name][scope] or setmetatable({
       access = setmetatable({ }, {
-        __index = tick,
+        __index = zero,
         __metatable = true,
       }),
       datastore = datastore(name, scope, ordered, opt),
@@ -323,7 +326,7 @@ local RbxDb: RbxDbImpl = { } :: RbxDbImpl do
       wait = function(key: key)
         local elapsed = 0
         while connection.locked[key] or (tick() - connection.access[key]) < KEY_REQUEST_THROTTLE do
-          elapsed += wait(6);
+          elapsed += wait(KEY_REQUEST_THROTTLE);
         end
         return elapsed
       end,
@@ -348,9 +351,18 @@ local RbxDb: RbxDbImpl = { } :: RbxDbImpl do
   end
 
   game:BindToClose(function()
+    if __VERBOSE__ then
+      print('[RbxDb] starting server shutdown')
+    end
     repeat
+      if __VERBOSE__ then
+        print(`[RbxDb] { requests } requests remaining...`)
+      end
       wait(1)
     until requests == 0
+    if __VERBOSE__ then
+      print('[RbxDb] shutdown successful')
+    end
   end)
 end
 
